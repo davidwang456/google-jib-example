@@ -1,6 +1,6 @@
 # Jib Spring Boot 示例项目
 
-这是一个使用 Jib 将 Spring Boot 应用打包成 Docker 镜像的示例项目。
+这是一个使用 Jib 将 Spring Boot 应用打包成 Docker 镜像的示例项目，展示了标准的四层架构（Entity、DAO、Service、Controller）和完整的单元测试。
 
 ## 项目结构
 
@@ -9,24 +9,54 @@ jibexample/
 ├── pom.xml                                    # Maven配置文件
 ├── README.md                                  # 项目说明文档
 └── src/
-    └── main/
-        ├── java/
-        │   └── com/
-        │       └── example/
-        │           └── jibexample/
-        │               ├── JibExampleApplication.java    # Spring Boot主类
-        │               └── controller/
-        │                   └── HelloController.java      # REST控制器
-        └── resources/
-            └── application.properties                    # 应用配置
+    ├── main/
+    │   ├── java/
+    │   │   └── com/
+    │   │       └── example/
+    │   │           └── jibexample/
+    │   │               ├── JibExampleApplication.java    # Spring Boot主类
+    │   │               ├── entity/
+    │   │               │   └── User.java                  # 用户实体类
+    │   │               ├── dao/
+    │   │               │   └── UserRepository.java        # 数据访问层接口
+    │   │               ├── service/
+    │   │               │   └── UserService.java           # 业务逻辑层
+    │   │               └── controller/
+    │   │                   ├── HelloController.java       # Hello REST控制器
+    │   │                   └── UserController.java        # 用户管理REST控制器
+    │   └── resources/
+    │       └── application.properties                     # 应用配置
+    └── test/
+        └── java/
+            └── com/
+                └── example/
+                    └── jibexample/
+                        ├── service/
+                        │   └── UserServiceTest.java      # Service层单元测试
+                        └── controller/
+                            └── UserControllerTest.java    # Controller层单元测试
 ```
 
 ## 功能特性
 
-- Spring Boot 3.2.0
-- RESTful API 示例
-- 健康检查端点
-- 使用 Jib Maven 插件打包 Docker 镜像
+- **Spring Boot 3.2.0** - 基于最新Spring Boot框架
+- **四层架构** - Entity、DAO、Service、Controller标准分层
+- **JPA数据访问** - 使用Spring Data JPA进行数据持久化
+- **H2内存数据库** - 开发环境使用H2数据库
+- **RESTful API** - 完整的用户管理API
+- **单元测试** - Service层和Controller层完整测试用例
+- **健康检查端点** - Actuator健康检查
+- **使用 Jib Maven 插件打包 Docker 镜像**
+
+## 技术栈
+
+- **JDK**: 17
+- **Spring Boot**: 3.2.0
+- **Spring Data JPA**: 数据访问层
+- **H2 Database**: 内存数据库
+- **JUnit 5**: 单元测试框架
+- **Mockito**: Mock测试框架
+- **Maven**: 项目构建工具
 
 ## 前置要求
 
@@ -90,7 +120,13 @@ mvn compile jib:build
 docker run -d -p 8080:8080 --name jib-example jib-example:latest
 ```
 
-### 4. 测试应用
+### 4. 运行单元测试
+
+```bash
+mvn test
+```
+
+### 5. 测试应用
 
 ```bash
 # 健康检查
@@ -98,13 +134,114 @@ curl http://localhost:8080/api/health
 
 # Hello接口
 curl http://localhost:8080/api/hello
+
+# 创建用户
+curl -X POST http://localhost:8080/api/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "testuser",
+    "email": "test@example.com",
+    "name": "测试用户"
+  }'
+
+# 获取所有用户
+curl http://localhost:8080/api/users
+
+# 根据ID获取用户
+curl http://localhost:8080/api/users/1
+
+# 根据用户名获取用户
+curl http://localhost:8080/api/users/username/testuser
+
+# 更新用户
+curl -X PUT http://localhost:8080/api/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "updateduser",
+    "email": "updated@example.com",
+    "name": "更新用户"
+  }'
+
+# 删除用户
+curl -X DELETE http://localhost:8080/api/users/1
 ```
 
 ## API 端点
 
+### Hello接口
 - `GET /api/hello` - 返回欢迎消息和时间戳
 - `GET /api/health` - 健康检查端点
+
+### 用户管理接口
+- `POST /api/users` - 创建用户
+- `GET /api/users` - 获取所有用户列表
+- `GET /api/users/{id}` - 根据ID获取用户
+- `GET /api/users/username/{username}` - 根据用户名获取用户
+- `PUT /api/users/{id}` - 更新用户信息
+- `DELETE /api/users/{id}` - 删除用户
+
+### Actuator端点
 - `GET /actuator/health` - Spring Boot Actuator 健康检查
+- `GET /h2-console` - H2数据库控制台（开发环境）
+
+## 数据库配置
+
+项目使用H2内存数据库，配置信息在 `application.properties` 中：
+
+- **数据库URL**: `jdbc:h2:mem:testdb`
+- **用户名**: `sa`
+- **密码**: 空
+- **JPA自动更新表结构**: `spring.jpa.hibernate.ddl-auto=update`
+
+可以通过 `http://localhost:8080/h2-console` 访问H2控制台（开发环境）。
+
+## 四层架构说明
+
+### 1. Entity层（实体层）
+- **位置**: `src/main/java/com/example/jibexample/entity/`
+- **说明**: 定义数据实体类，使用JPA注解进行ORM映射
+- **示例**: `User.java` - 用户实体类
+
+### 2. DAO层（数据访问层）
+- **位置**: `src/main/java/com/example/jibexample/dao/`
+- **说明**: 数据访问接口，继承Spring Data JPA的`JpaRepository`
+- **示例**: `UserRepository.java` - 用户数据访问接口
+
+### 3. Service层（业务逻辑层）
+- **位置**: `src/main/java/com/example/jibexample/service/`
+- **说明**: 业务逻辑处理，包含数据验证、异常处理等
+- **示例**: `UserService.java` - 用户业务逻辑服务
+
+### 4. Controller层（控制器层）
+- **位置**: `src/main/java/com/example/jibexample/controller/`
+- **说明**: REST API控制器，处理HTTP请求和响应
+- **示例**: `UserController.java` - 用户管理REST控制器
+
+## 单元测试
+
+项目包含完整的单元测试用例：
+
+### Service层测试
+- **文件**: `src/test/java/com/example/jibexample/service/UserServiceTest.java`
+- **测试内容**:
+  - 用户创建（成功/失败场景）
+  - 用户查询（ID/用户名）
+  - 用户更新
+  - 用户删除
+  - 异常处理
+
+### Controller层测试
+- **文件**: `src/test/java/com/example/jibexample/controller/UserControllerTest.java`
+- **测试内容**:
+  - REST API端点测试
+  - HTTP状态码验证
+  - JSON响应格式验证
+  - 异常响应处理
+
+运行测试：
+```bash
+mvn test
+```
 
 ## Jib 配置说明
 
@@ -123,11 +260,38 @@ curl http://localhost:8080/api/hello
 3. **分层优化** - 依赖和代码分离，加快构建速度
 4. **可重现构建** - 相同输入产生相同输出
 
+## 开发说明
+
+### 运行应用
+
+```bash
+# 编译项目
+mvn clean compile
+
+# 运行应用
+mvn spring-boot:run
+```
+
+应用将在 `http://localhost:8080` 启动。
+
+### 测试覆盖率
+
+项目包含完整的单元测试，覆盖了Service层和Controller层的主要功能。建议在开发新功能时同步添加相应的测试用例。
+
+### 代码规范
+
+- 使用标准的Java命名规范
+- 遵循Spring Boot最佳实践
+- 保持代码注释清晰
+- 确保单元测试覆盖主要业务逻辑
+
 ## 参考资源
 
 - [Jib GitHub](https://github.com/GoogleContainerTools/jib)
 - [Jib Maven Plugin 文档](https://github.com/GoogleContainerTools/jib/tree/master/jib-maven-plugin)
 - [Spring Boot 文档](https://spring.io/projects/spring-boot)
+- [Spring Data JPA 文档](https://spring.io/projects/spring-data-jpa)
+- [H2 Database 文档](https://www.h2database.com/html/main.html)
 
 ## 许可证
 
