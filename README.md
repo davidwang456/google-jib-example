@@ -76,16 +76,36 @@ mvn clean package
 
 #### 方式一：构建并加载到本地 Docker（推荐）
 
+使用默认配置：
 ```bash
 mvn compile jib:dockerBuild
 ```
 
-这会在本地构建镜像并加载到 Docker daemon 中，镜像名为 `jib-example:latest`。
+使用自定义镜像配置：
+```bash
+# 指定基础镜像和目标镜像
+mvn compile jib:dockerBuild \
+  -Djib.from.image=eclipse-temurin:17-jre-alpine \
+  -Djib.to.image=my-custom-image:1.0.0
+
+# 或者只覆盖目标镜像
+mvn compile jib:dockerBuild -Djib.to.image=my-registry.com/my-app:v1.0.0
+```
+
+这会在本地构建镜像并加载到 Docker daemon 中。
 
 #### 方式二：构建 Docker tar 文件
 
+使用默认配置：
 ```bash
 mvn compile jib:buildTar
+```
+
+使用自定义镜像配置：
+```bash
+mvn compile jib:buildTar \
+  -Djib.from.image=eclipse-temurin:17-jre-alpine \
+  -Djib.to.image=my-app:latest
 ```
 
 这会生成一个 tar 文件：`target/jib-image.tar`，可以使用以下命令加载：
@@ -96,23 +116,21 @@ docker load -i target/jib-image.tar
 
 #### 方式三：直接推送到远程仓库
 
-修改 `pom.xml` 中的 `<to><image>` 配置为你的镜像仓库地址：
-
-```xml
-<to>
-    <image>your-registry.com/your-username/jib-example:latest</image>
-</to>
-```
-
-然后执行：
+使用命令行参数指定远程仓库地址：
 
 ```bash
 # 需要先登录到镜像仓库
 docker login your-registry.com
 
-# 构建并推送
-mvn compile jib:build
+# 构建并推送到远程仓库
+mvn compile jib:build \
+  -Djib.from.image=eclipse-temurin:17-jre-alpine \
+  -Djib.to.image=your-registry.com/your-username/jib-example:latest
 ```
+
+**注意**：如果不指定命令行参数，将使用 `pom.xml` 中 `<properties>` 部分定义的默认值：
+- `jib.from.image` (默认: `eclipse-temurin:17-jre-alpine`)
+- `jib.to.image` (默认: `jib-example:latest`)
 
 ### 3. 运行容器
 
@@ -245,13 +263,38 @@ mvn test
 
 ## Jib 配置说明
 
-在 `pom.xml` 中配置了 Jib Maven 插件：
+在 `pom.xml` 中配置了 Jib Maven 插件，基础镜像和目标镜像可以通过命令行参数动态指定：
+
+### 默认配置（在 pom.xml 的 properties 中定义）
 
 - **基础镜像**: `eclipse-temurin:17-jre-alpine` (轻量级 JRE)
 - **目标镜像**: `jib-example:latest`
 - **JVM参数**: `-Xms512m -Xmx512m`
 - **端口**: `8080`
 - **格式**: `docker`
+
+### 通过命令行参数覆盖镜像配置
+
+可以在执行 Jib 命令时通过 Maven 属性覆盖默认配置：
+
+```bash
+# 覆盖基础镜像
+mvn compile jib:dockerBuild -Djib.from.image=openjdk:17-jre-slim
+
+# 覆盖目标镜像
+mvn compile jib:dockerBuild -Djib.to.image=my-registry.com/my-app:v1.0.0
+
+# 同时覆盖基础镜像和目标镜像
+mvn compile jib:dockerBuild \
+  -Djib.from.image=eclipse-temurin:17-jre-alpine \
+  -Djib.to.image=registry.example.com/jib-example:1.0.0
+```
+
+**参数说明**：
+- `-Djib.from.image`: 指定基础镜像（FROM镜像）
+- `-Djib.to.image`: 指定目标镜像名称和标签
+
+这种方式使得在不同环境（开发、测试、生产）中使用不同的镜像配置变得更加灵活，无需修改 `pom.xml` 文件。
 
 ## Jib 的优势
 
