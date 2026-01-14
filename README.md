@@ -303,6 +303,223 @@ mvn compile jib:dockerBuild \
 3. **分层优化** - 依赖和代码分离，加快构建速度
 4. **可重现构建** - 相同输入产生相同输出
 
+## 使用 Buildah 从 Maven 镜像复制 JDK 和 Maven
+
+Buildah 是一个用于构建 OCI（Open Container Initiative）容器镜像的工具，它可以在不需要 Docker daemon 的情况下构建镜像。以下步骤详细说明如何从一个 Maven 镜像中提取 JDK 和 Maven，并将它们复制到使用 buildah 构建的新镜像中。
+
+### 前置要求
+
+- 安装 buildah（Linux 系统或 WSL）
+- 了解容器镜像的基本概念
+
+### 步骤一：准备工作
+
+首先，确定源 Maven 镜像和目标基础镜像：
+
+```bash
+# 源 Maven 镜像（包含 JDK 和 Maven）
+SOURCE_IMAGE="maven:3.9-eclipse-temurin-17"
+
+# 目标基础镜像（可以是任何基础镜像，如 alpine、ubuntu 等）
+TARGET_BASE_IMAGE="alpine:latest"
+
+# 新镜像名称
+NEW_IMAGE_NAME="custom-maven-jdk:17"
+```
+
+### 步骤二：创建临时容器并提取文件
+
+使用 buildah 从源镜像创建容器，并提取 JDK 和 Maven：
+
+```bash
+# 1. 从源 Maven 镜像创建容器
+SOURCE_CONTAINER=$(buildah from $SOURCE_IMAGE)
+
+# 2. 创建临时目录用于存储提取的文件
+TEMP_DIR=$(mktemp -d)
+echo "临时目录: $TEMP_DIR"
+
+# 3. 从源容器中复制 JDK（通常在 /usr/local/openjdk-17 或 /opt/java/openjdk）
+buildah copy --from $SOURCE_CONTAINER $TEMP_DIR/jdk /usr/local/openjdk-17
+
+# 4. 从源容器中复制 Maven（通常在 /usr/share/maven）
+buildah copy --from $SOURCE_CONTAINER $TEMP_DIR/maven /usr/share/maven
+
+# 5. 检查复制的文件
+ls -la $TEMP_DIR/jdk
+ls -la $TEMP_DIR/maven
+```
+
+**注意**：JDK 和 Maven 的路径可能因镜像而异，常见路径包括：
+- JDK: `/usr/local/openjdk-17`, `/opt/java/openjdk`, `/usr/lib/jvm/java-17-openjdk`
+- Maven: `/usr/share/maven`, `/opt/maven`, `/usr/local/maven`
+
+### 步骤三：查找 JDK 和 Maven 的实际路径
+
+如果不确定路径，可以先进入容器查看：
+
+```bash
+# 进入源容器查看文件结构
+buildah run $SOURCE_CONTAINER -- sh -c "echo 'JAVA_HOME:' && echo \$JAVA_HOME"
+buildah run $SOURCE_CONTAINER -- sh -c "which java"
+buildah run $SOURCE_CONTAINER -- sh -c "mvn --version"
+buildah run $SOURCE_CONTAINER -- sh -c "ls -la /usr/local/ | grep -E 'openjdk|java'"
+buildah run $SOURCE_CONTAINER -- sh -c "ls -la /usr/share/ | grep maven"
+```
+
+### 步骤四：创建新镜像并复制文件
+
+使用 buildah 创建新镜像，并复制 JDK 和 Maven：
+
+```bash
+# 1. 从目标基础镜像创建新容器
+NEW_CONTAINER=$(buildah from $TARGET_BASE_IMAGE)
+
+# 2. 安装必要的依赖（Alpine 需要安装 glibc 兼容层）
+buildah run $NEW_CONTAINER -- sh -c "apk add --no-cache bash curl"
+
+# 3. 复制 JDK 到新容器
+buildah copy $NEW_CONTAINER $TEMP_DIR/jdk /usr/local/openjdk-17
+
+# 4. 复制 Maven 到新容器
+buildah copy $NEW_CONTAINER $TEMP_DIR/maven /usr/share/maven
+
+# 5. 设置环境变量
+buildah config --env JAVA_HOME=/usr/local/openjdk-17 $NEW_CONTAINER
+buildah config --env PATH="$JAVA_HOME/bin:/usr/share/maven/bin:$PATH" $NEW_CONTAINER
+buildah config --env MAVEN_HOME=/usr/share/maven $NEW_CONTAINER
+
+# 6. 创建符号链接（如果需要）
+buildah run $NEW_CONTAINER -- sh -c "ln -s /usr/local/openjdk-17/bin/java /usr/local/bin/java || true"
+buildah run $NEW_CONTAINER -- sh -c "ln -s /usr/share/maven/bin/mvn /usr/local/bin/mvn || true"
+
+# 7. 验证安装
+buildah run $NEW_CONTAINER -- java -version
+buildah run $NEW_CONTAINER -- mvn --version
+```
+
+### 步骤五：提交镜像
+
+将容器提交为镜像：
+
+```bash
+# 提交为新镜像
+buildah commit $NEW_CONTAINER $NEW_IMAGE_NAME
+
+# 清理临时容器
+buildah rm $SOURCE_CONTAINER $NEW_CONTAINER
+
+# 清理临时目录
+rm -rf $TEMP_DIR
+```
+
+### 完整脚本示例
+
+以下是一个完整的脚本，自动化上述过程：
+
+```bash
+#!/bin/bash
+set -e
+
+# 配置变量
+SOURCE_IMAGE="maven:3.9-eclipse-temurin-17"
+TARGET_BASE_IMAGE="alpine:latest"
+NEW_IMAGE_NAME="custom-maven-jdk:17"
+
+echo "=== 步骤 1: 从源镜像创建容器 ==="
+SOURCE_CONTAINER=$(buildah from $SOURCE_IMAGE)
+echo "源容器: $SOURCE_CONTAINER"
+
+echo "=== 步骤 2: 查找 JDK 和 Maven 路径 ==="
+JAVA_HOME=$(buildah run $SOURCE_CONTAINER -- sh -c 'echo $JAVA_HOME')
+MAVEN_HOME=$(buildah run $SOURCE_CONTAINER -- sh -c 'echo $MAVEN_HOME || echo /usr/share/maven')
+echo "JAVA_HOME: $JAVA_HOME"
+echo "MAVEN_HOME: $MAVEN_HOME"
+
+echo "=== 步骤 3: 创建临时目录并提取文件 ==="
+TEMP_DIR=$(mktemp -d)
+buildah copy --from $SOURCE_CONTAINER $TEMP_DIR/jdk $JAVA_HOME
+buildah copy --from $SOURCE_CONTAINER $TEMP_DIR/maven $MAVEN_HOME
+
+echo "=== 步骤 4: 创建新镜像 ==="
+NEW_CONTAINER=$(buildah from $TARGET_BASE_IMAGE)
+
+# 安装依赖（Alpine）
+buildah run $NEW_CONTAINER -- sh -c "apk add --no-cache bash curl"
+
+# 复制文件
+buildah copy $NEW_CONTAINER $TEMP_DIR/jdk $JAVA_HOME
+buildah copy $NEW_CONTAINER $TEMP_DIR/maven $MAVEN_HOME
+
+# 设置环境变量
+buildah config --env JAVA_HOME=$JAVA_HOME $NEW_CONTAINER
+buildah config --env MAVEN_HOME=$MAVEN_HOME $NEW_CONTAINER
+buildah config --env PATH="$JAVA_HOME/bin:$MAVEN_HOME/bin:\$PATH" $NEW_CONTAINER
+
+# 创建符号链接
+buildah run $NEW_CONTAINER -- sh -c "ln -sf $JAVA_HOME/bin/java /usr/local/bin/java"
+buildah run $NEW_CONTAINER -- sh -c "ln -sf $MAVEN_HOME/bin/mvn /usr/local/bin/mvn"
+
+echo "=== 步骤 5: 验证安装 ==="
+buildah run $NEW_CONTAINER -- java -version
+buildah run $NEW_CONTAINER -- mvn --version
+
+echo "=== 步骤 6: 提交镜像 ==="
+buildah commit $NEW_CONTAINER $NEW_IMAGE_NAME
+
+echo "=== 步骤 7: 清理 ==="
+buildah rm $SOURCE_CONTAINER $NEW_CONTAINER
+rm -rf $TEMP_DIR
+
+echo "=== 完成！镜像 $NEW_IMAGE_NAME 已创建 ==="
+```
+
+### 使用新镜像
+
+镜像创建完成后，可以像使用普通 Docker 镜像一样使用它：
+
+```bash
+# 查看镜像
+buildah images | grep custom-maven-jdk
+
+# 运行容器测试
+buildah run $(buildah from custom-maven-jdk:17) -- java -version
+buildah run $(buildah from custom-maven-jdk:17) -- mvn --version
+
+# 导出为 Docker 格式（如果需要）
+buildah push custom-maven-jdk:17 docker-daemon:custom-maven-jdk:17
+```
+
+### 注意事项
+
+1. **路径差异**：不同基础镜像的 JDK 和 Maven 路径可能不同，需要根据实际情况调整
+2. **依赖库**：Alpine 镜像使用 musl libc，可能需要安装 glibc 兼容层
+3. **文件权限**：确保复制的文件具有正确的执行权限
+4. **镜像大小**：复制完整的 JDK 和 Maven 会增加镜像大小，考虑使用多阶段构建优化
+5. **环境变量**：确保正确设置 `JAVA_HOME`、`MAVEN_HOME` 和 `PATH`
+
+### 替代方案：使用多阶段构建
+
+如果使用 Dockerfile，可以使用多阶段构建更简洁地实现：
+
+```dockerfile
+# 阶段1：从 Maven 镜像提取文件
+FROM maven:3.9-eclipse-temurin-17 AS maven-source
+COPY --from=maven-source /usr/local/openjdk-17 /tmp/jdk
+COPY --from=maven-source /usr/share/maven /tmp/maven
+
+# 阶段2：构建最终镜像
+FROM alpine:latest
+RUN apk add --no-cache bash curl
+COPY --from=maven-source /tmp/jdk /usr/local/openjdk-17
+COPY --from=maven-source /tmp/maven /usr/share/maven
+ENV JAVA_HOME=/usr/local/openjdk-17
+ENV MAVEN_HOME=/usr/share/maven
+ENV PATH="$JAVA_HOME/bin:$MAVEN_HOME/bin:$PATH"
+RUN ln -sf $JAVA_HOME/bin/java /usr/local/bin/java && \
+    ln -sf $MAVEN_HOME/bin/mvn /usr/local/bin/mvn
+```
+
 ## 开发说明
 
 ### 运行应用
